@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <windows.h> // Required for Resource Extraction
 
 namespace fs = std::filesystem;
 
@@ -31,6 +32,29 @@ void makeDir(const fs::path& path) {
         fs::create_directories(path);
         std::cout << "[RyDesk] Created directory: " << path.string() << "\n";
     }
+}
+
+// ==========================================
+// Extract Embedded Icon from EXE
+// ==========================================
+bool extractEmbeddedIcon(const std::string& outputPath) {
+    HRSRC hRes = FindResource(NULL, "MY_ICON_DATA", RT_RCDATA);
+    if (!hRes) return false;
+    
+    HGLOBAL hMem = LoadResource(NULL, hRes);
+    if (!hMem) return false;
+    
+    DWORD size = SizeofResource(NULL, hRes);
+    void* data = LockResource(hMem);
+    if (!data) return false;
+
+    std::ofstream file(outputPath, std::ios::binary);
+    if (file.is_open()) {
+        file.write(static_cast<const char*>(data), size);
+        file.close();
+        return true;
+    }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
@@ -69,10 +93,7 @@ int main(int argc, char* argv[]) {
     fs::path baseCppPath = rootPath / "src/main/cpp" / packagePath;
     fs::path baseResPath = rootPath / "src/main/resources";
 
-    // 1. Create Directories
-    makeDir(rootPath / "build/debug");
-    makeDir(rootPath / "build/release");
-    makeDir(rootPath / "build/engine");
+    // 1. Create Directories (Removed 'build' folder generation from here)
     makeDir(rootPath / "rydesk/vendor/include");
     makeDir(rootPath / "rydesk/vendor/libraries");
     
@@ -88,24 +109,27 @@ int main(int argc, char* argv[]) {
     makeDir(baseResPath / "assets/images");
 
     // ==========================================
-    // Icon Configuration Logic (Updated Path)
+    // Extracting Icon & Generating Project Specific .rc
     // ==========================================
-    fs::path sourceIcon = fs::current_path() / "resources/assets/images/icon.ico";
-    if (fs::exists(sourceIcon)) {
-        fs::copy_file(sourceIcon, baseResPath / "assets/images/icon.ico", fs::copy_options::overwrite_existing);
+    fs::path generatedIconPath = baseResPath / "assets/images/icon.ico";
+    
+    if (extractEmbeddedIcon(generatedIconPath.string())) {
         std::string rcContent = "MAINICON ICON \"src/main/resources/assets/images/icon.ico\"\n";
-        writeToFile(rootPath / "resource.rc", rcContent);
-        std::cout << "[RyDesk] Attached custom icon (icon.ico) to the new project.\n";
+        fs::path rcFilePath = baseResPath / (projectName + ".rc");
+        writeToFile(rcFilePath, rcContent);
+        std::cout << "[RyDesk] Successfully extracted and attached the embedded icon to the new project.\n";
     } else {
-        std::cout << "[RyDesk] Notice: 'resources/assets/images/icon.ico' not found. Default Windows icon will be used.\n";
+        std::cout << "[RyDesk] Notice: Embedded icon not found. Default Windows icon will be used.\n";
     }
 
     // 2. Generate Configuration and Script Files
     std::string envContent = "APP_NAME=" + projectName + "\nENVIRONMENT=dev\n";
     writeToFile(rootPath / "app.env", envContent);
 
+    // Updated batScript to create build/engine ONLY when executed
     std::string batScript = 
         "@echo off\n"
+        "if not exist build\\engine mkdir build\\engine\n"
         "if not exist build\\engine\\build.exe (\n"
         "    g++ build.cpp -std=c++20 -o build\\engine\\build.exe\n"
         ")\n"
@@ -118,6 +142,7 @@ int main(int argc, char* argv[]) {
         ")\n";
     writeToFile(rootPath / "rydesk.bat", batScript);
 
+    // Updated buildCpp to dynamically create debug/release folders and use ProjectNameApp.cpp
     std::string buildCpp = 
         "#include <iostream>\n"
         "#include <string>\n"
@@ -127,18 +152,21 @@ int main(int argc, char* argv[]) {
         "const std::string VERSION = \"v1.0.0\";\n\n"
         "int main(int argc, char* argv[]) {\n"
         "    std::string action = (argc > 1) ? argv[1] : \"\";\n"
-        "    std::string srcFiles = \"src/main/cpp/" + packagePath + "Main.cpp \" \n"
+        "    std::string srcFiles = \"src/main/cpp/" + packagePath + projectName + "App.cpp \" \n"
         "                           \"src/main/cpp/" + packagePath + "engine/CounterController.cpp \" \n"
         "                           \"src/main/cpp/" + packagePath + "presentation/components/Button.cpp \" \n"
         "                           \"src/main/cpp/" + packagePath + "presentation/screens/MainScreen.cpp \";\n\n"
         "    std::string includeFlag = \"-I src/main/cpp/" + packagePath + "include\";\n"
         "    std::string linkers = \"-ldwmapi -lgdi32\";\n\n"
+        "    std::string rcPath = \"src/main/resources/\" + PROGRAM_NAME + \".rc\";\n"
         "    std::string resourceObj = \"\";\n"
-        "    if (std::filesystem::exists(\"resource.rc\")) {\n"
-        "        std::system(\"windres resource.rc -o build/engine/resource.o\");\n"
+        "    if (std::filesystem::exists(rcPath)) {\n"
+        "        std::string rcCmd = \"windres \" + rcPath + \" -o build/engine/resource.o\";\n"
+        "        std::system(rcCmd.c_str());\n"
         "        resourceObj = \" build/engine/resource.o \";\n"
         "    }\n\n"
         "    if (action == \"run\") {\n"
+        "        if (!std::filesystem::exists(\"build/debug\")) std::filesystem::create_directories(\"build/debug\");\n"
         "        std::string outPath = \"build/debug/\" + PROGRAM_NAME + \"_debug.exe\";\n"
         "        std::string runCmd = \".\\\\build\\\\debug\\\\\" + PROGRAM_NAME + \"_debug.exe\";\n"
         "        std::cout << \"[RyDesk] Compiling Debug GUI (C++20)...\\n\";\n"
@@ -150,6 +178,7 @@ int main(int argc, char* argv[]) {
         "            std::cerr << \"[RyDesk] Build failed.\\n\";\n"
         "        }\n"
         "    } else if (action == \"build\") {\n"
+        "        if (!std::filesystem::exists(\"build/release\")) std::filesystem::create_directories(\"build/release\");\n"
         "        std::string outPath = \"build/release/\" + PROGRAM_NAME + \"_\" + VERSION + \".exe\";\n"
         "        std::cout << \"[RyDesk] Compiling Production GUI (C++20)...\\n\";\n"
         "        std::string cmd = \"g++ -std=c++20 \" + srcFiles + resourceObj + includeFlag + \" -mwindows -O3 -DNDEBUG -o \" + outPath + \" \" + linkers;\n"
@@ -311,6 +340,7 @@ int main(int argc, char* argv[]) {
         "}\n";
     writeToFile(baseCppPath / "presentation/screens/MainScreen.cpp", screenCpp);
 
+    // Write the entry point file as ProjectNameApp.cpp
     std::string mainCpp = 
         "#include <windows.h>\n"
         "#include \"presentation/screens/MainScreen.h\"\n\n"
@@ -319,8 +349,8 @@ int main(int argc, char* argv[]) {
         "    app.render(\"" + projectName + " - Powered by RyDesk\");\n"
         "    return 0;\n"
         "}\n";
-    writeToFile(baseCppPath / "Main.cpp", mainCpp);
+    writeToFile(baseCppPath / (projectName + "App.cpp"), mainCpp);
 
-    std::cout << "\n[RyDesk] Success! Your project is ready. The build engine is neatly organized in the 'build/engine/' folder.\n";
+    std::cout << "\n[RyDesk] Success! Your project is ready.\n";
     return 0;
 }

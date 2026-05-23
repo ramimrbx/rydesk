@@ -1,1 +1,2 @@
-id ICON "resources/assets/images/icon.ico"
+MAINICON ICON "resources/assets/images/icon.ico"
+MY_ICON_DATA RCDATA "resources/assets/images/icon.ico"
