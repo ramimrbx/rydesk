@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <windows.h> // Required for Resource Extraction
+#include <windows.h>
 
 namespace fs = std::filesystem;
 
@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
     fs::path baseCppPath = rootPath / "src/main/cpp" / packagePath;
     fs::path baseResPath = rootPath / "src/main/resources";
 
-    // 1. Create Directories (Removed 'build' folder generation from here)
+    // 1. Create Directories for generated project
     makeDir(rootPath / "rydesk/vendor/include");
     makeDir(rootPath / "rydesk/vendor/libraries");
     
@@ -126,7 +126,6 @@ int main(int argc, char* argv[]) {
     std::string envContent = "APP_NAME=" + projectName + "\nENVIRONMENT=dev\n";
     writeToFile(rootPath / "app.env", envContent);
 
-    // Updated batScript to create build/engine ONLY when executed
     std::string batScript = 
         "@echo off\n"
         "if not exist build\\engine mkdir build\\engine\n"
@@ -142,7 +141,6 @@ int main(int argc, char* argv[]) {
         ")\n";
     writeToFile(rootPath / "rydesk.bat", batScript);
 
-    // Updated buildCpp to dynamically create debug/release folders and use ProjectNameApp.cpp
     std::string buildCpp = 
         "#include <iostream>\n"
         "#include <string>\n"
@@ -195,7 +193,7 @@ int main(int argc, char* argv[]) {
     writeToFile(rootPath / "build.cpp", buildCpp);
 
     // ==========================================
-    // MVC Architecture
+    // Component-Driven MVC Architecture Generation
     // ==========================================
 
     std::string engineH = 
@@ -220,21 +218,74 @@ int main(int argc, char* argv[]) {
     std::string btnH = 
         "#pragma once\n"
         "#include <windows.h>\n"
+        "#include <string>\n"
+        "#include <functional>\n"
+        "#include <unordered_map>\n\n"
+        "enum class Align {\n"
+        "    TopLeft, TopCenter, TopRight,\n"
+        "    CenterLeft, Center, CenterRight,\n"
+        "    BottomLeft, BottomCenter, BottomRight,\n"
+        "    Custom\n"
+        "};\n\n"
+        "struct ButtonProps {\n"
+        "    std::string text = \"Button\";\n"
+        "    Align align = Align::Custom;\n"
+        "    int x = 0;\n"
+        "    int y = 0;\n"
+        "    int width = 100;\n"
+        "    int height = 40;\n"
+        "    std::function<void()> onClick = nullptr;\n"
+        "};\n\n"
         "class Button {\n"
         "private:\n"
         "    HWND hwnd;\n"
+        "    ButtonProps props;\n"
+        "    int internalId;\n"
+        "    static int nextId;\n"
+        "    static std::unordered_map<int, std::function<void()>> eventRegistry;\n"
         "public:\n"
         "    Button();\n"
-        "    void create(HWND parent, int id, const char* text, int x, int y, int w, int h);\n"
+        "    Button(const ButtonProps& p);\n"
+        "    void render(HWND parent);\n"
+        "    static void triggerClick(int id);\n"
         "};\n";
     writeToFile(baseCppPath / "include/presentation/components/Button.h", btnH);
 
     std::string btnCpp = 
-        "#include \"presentation/components/Button.h\"\n"
-        "Button::Button() : hwnd(NULL) {}\n"
-        "void Button::create(HWND parent, int id, const char* text, int x, int y, int w, int h) {\n"
-        "    hwnd = CreateWindow(\"BUTTON\", text, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,\n"
-        "                        x, y, w, h, parent, (HMENU)(INT_PTR)id,\n"
+        "#include \"presentation/components/Button.h\"\n\n"
+        "int Button::nextId = 1000;\n"
+        "std::unordered_map<int, std::function<void()>> Button::eventRegistry;\n\n"
+        "Button::Button() : hwnd(NULL), internalId(-1) {}\n"
+        "Button::Button(const ButtonProps& p) : hwnd(NULL), props(p) {\n"
+        "    internalId = nextId++;\n"
+        "    if (props.onClick) {\n"
+        "        eventRegistry[internalId] = props.onClick;\n"
+        "    }\n"
+        "}\n\n"
+        "void Button::triggerClick(int id) {\n"
+        "    if (eventRegistry.find(id) != eventRegistry.end()) {\n"
+        "        eventRegistry[id]();\n"
+        "    }\n"
+        "}\n\n"
+        "void Button::render(HWND parent) {\n"
+        "    RECT rect;\n"
+        "    GetClientRect(parent, &rect);\n"
+        "    int pW = rect.right - rect.left;\n"
+        "    int pH = rect.bottom - rect.top;\n"
+        "    int finalX = props.x;\n"
+        "    int finalY = props.y;\n\n"
+        "    if (props.align != Align::Custom) {\n"
+        "        if (props.align == Align::TopCenter || props.align == Align::Center || props.align == Align::BottomCenter)\n"
+        "            finalX = (pW - props.width) / 2 + props.x;\n"
+        "        else if (props.align == Align::TopRight || props.align == Align::CenterRight || props.align == Align::BottomRight)\n"
+        "            finalX = pW - props.width - props.x;\n"
+        "        if (props.align == Align::CenterLeft || props.align == Align::Center || props.align == Align::CenterRight)\n"
+        "            finalY = (pH - props.height) / 2 + props.y;\n"
+        "        else if (props.align == Align::BottomLeft || props.align == Align::BottomCenter || props.align == Align::BottomRight)\n"
+        "            finalY = pH - props.height - props.y;\n"
+        "    }\n\n"
+        "    hwnd = CreateWindow(\"BUTTON\", props.text.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,\n"
+        "                        finalX, finalY, props.width, props.height, parent, (HMENU)(INT_PTR)internalId,\n"
         "                        (HINSTANCE)GetWindowLongPtr(parent, GWLP_HINSTANCE), NULL);\n"
         "    HFONT hFont = CreateFont(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, \"Segoe UI Variable\");\n"
         "    SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, TRUE);\n"
@@ -272,6 +323,7 @@ int main(int argc, char* argv[]) {
         "};\n";
     writeToFile(baseCppPath / "include/presentation/screens/MainScreen.h", screenH);
 
+    // Notice the fix inside WM_CTLCOLORSTATIC below
     std::string screenCpp = 
         "#include \"presentation/screens/MainScreen.h\"\n"
         "#include <string>\n\n"
@@ -295,18 +347,13 @@ int main(int argc, char* argv[]) {
         "    if (uMsg == WM_CTLCOLORSTATIC) {\n"
         "        HDC hdcStatic = (HDC)wParam;\n"
         "        SetTextColor(hdcStatic, RGB(255, 255, 255));\n"
-        "        SetBkMode(hdcStatic, TRANSPARENT);\n"
-        "        return (LRESULT)GetStockObject(NULL_BRUSH);\n"
+        "        // FIXED: Using a solid background brush to prevent text overlap\n"
+        "        SetBkColor(hdcStatic, RGB(32, 32, 32));\n"
+        "        static HBRUSH hBgBrush = CreateSolidBrush(RGB(32, 32, 32));\n"
+        "        return (LRESULT)hBgBrush;\n"
         "    }\n"
         "    if (uMsg == WM_COMMAND) {\n"
-        "        if (LOWORD(wParam) == 1) {\n"
-        "            if (instance) {\n"
-        "                instance->counter.increment();\n"
-        "                std::string newText = \"Current Count: \" + std::to_string(instance->counter.getCount());\n"
-        "                SetWindowText(instance->hLabel, newText.c_str());\n"
-        "                InvalidateRect(hwnd, NULL, TRUE);\n"
-        "            }\n"
-        "        }\n"
+        "        Button::triggerClick(LOWORD(wParam));\n"
         "        return 0;\n"
         "    }\n"
         "    return DefWindowProc(hwnd, uMsg, wParam, lParam);\n"
@@ -329,7 +376,21 @@ int main(int argc, char* argv[]) {
         "        50, 40, 280, 25, hwnd, NULL, hInstance, NULL);\n"
         "    HFONT hFont = CreateFont(20, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, \"Segoe UI Variable\");\n"
         "    SendMessage(hLabel, WM_SETFONT, (WPARAM)hFont, TRUE);\n\n"
-        "    clickButton.create(hwnd, 1, \"Click Here\", 120, 100, 140, 40);\n\n"
+        "    // Component-driven button setup with Lambda Action!\n"
+        "    clickButton = Button({\n"
+        "        .text = \"Click to Add (+1)\",\n"
+        "        .align = Align::Center,\n"
+        "        .width = 180,\n"
+        "        .height = 45,\n"
+        "        .onClick = [this]() {\n"
+        "            if (instance) {\n"
+        "                instance->counter.increment();\n"
+        "                std::string newText = \"Current Count: \" + std::to_string(instance->counter.getCount());\n"
+        "                SetWindowText(instance->hLabel, newText.c_str());\n"
+        "            }\n"
+        "        }\n"
+        "    });\n"
+        "    clickButton.render(hwnd);\n\n"
         "    ShowWindow(hwnd, SW_SHOW);\n"
         "    UpdateWindow(hwnd);\n\n"
         "    MSG msg = {0};\n"

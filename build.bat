@@ -4,50 +4,67 @@ echo             RyDesk CLI Build System
 echo ===================================================
 echo.
 
-:: 1. Compile resource file using windres
-set RES_FILE=
-if exist "resources\rydesk.rc" (
-    echo [RyDesk] Found resource file at: resources\rydesk.rc
-    echo [RyDesk] Compiling resource file...
-    windres "resources\rydesk.rc" -o rydesk_res.o
-    
-    if exist rydesk_res.o (
-        set RES_FILE=rydesk_res.o
-    ) else (
-        echo [Warning] windres failed to compile the resource file. Check icon path inside .rc file.
-    )
+:: 1. Determine Build Mode from Command Line Argument
+set BUILD_MODE=
+if /I "%1"=="debug" (
+    set BUILD_MODE=debug
+) else if /I "%1"=="publish" (
+    set BUILD_MODE=release
+) else if "%1"=="" (
+    echo [Notice] No argument provided. Defaulting to 'publish' mode...
+    set BUILD_MODE=release
 ) else (
-    echo [RyDesk] Notice: resources\rydesk.rc not found. Compiling without custom icon.
-)
-
-:: 2. Locate the main C++ source file
-set SRC_FILE=
-if exist rydesk.cpp (
-    set SRC_FILE=rydesk.cpp
-) else if exist main.cpp (
-    set SRC_FILE=main.cpp
-)
-
-if "%SRC_FILE%"=="" (
-    echo [Error] Neither rydesk.cpp nor main.cpp was found in the root directory!
+    echo [Error] Invalid argument: "%1"
+    echo Usage: build.bat [debug ^| publish]
     goto end
 )
 
-:: 3. Final compilation with G++
-echo [RyDesk] Compiling %SRC_FILE% using C++20...
-g++ %SRC_FILE% %RES_FILE% -std=c++20 -o rydesk.exe
+:: 2. Create build directories if they don't exist
+if not exist "build\debug" mkdir "build\debug"
+if not exist "build\release" mkdir "build\release"
+
+:: 3. Compile Resource File (If exists)
+set RC_PATH=src\main\resources\rydesk.rc
+set RES_FILE=
+
+if exist "%RC_PATH%" (
+    echo [RyDesk] Compiling resource file...
+    windres "%RC_PATH%" -o build\rydesk_res.o
+    set RES_FILE=build\rydesk_res.o
+) else (
+    echo [Notice] rydesk.rc not found in src\main\resources.
+)
+
+:: 4. Setup Source Directories
+set SRC_DIR=src\main\cpp\com\rybecx\rydesk
+set INC_DIR=src\main\cpp\com\rybecx\rydesk\include
+
+if not exist "%SRC_DIR%\RydeskApp.cpp" (
+    echo [Error] RydeskApp.cpp not found at %SRC_DIR%!
+    goto end
+)
+
+:: 5. Compile everything together
+echo [RyDesk] Compiling RyDesk CLI Engine (%BUILD_MODE% mode)...
+
+if "%BUILD_MODE%"=="debug" (
+    g++ "%SRC_DIR%\RydeskApp.cpp" %RES_FILE% -I "%INC_DIR%" -std=c++20 -g -o "build\debug\rydesk_debug.exe"
+    set OUT_FILE=build\debug\rydesk_debug.exe
+) else (
+    g++ "%SRC_DIR%\RydeskApp.cpp" %RES_FILE% -I "%INC_DIR%" -std=c++20 -O3 -o "build\release\rydesk.exe"
+    set OUT_FILE=build\release\rydesk.exe
+)
 
 if %ERRORLEVEL% equ 0 (
     echo.
     echo ===================================================
-    echo [Success] rydesk.exe created successfully!
+    echo [Success] %OUT_FILE% created successfully!
     echo ===================================================
-    
-    :: Cleanup the temporary object file to keep directory clean
-    if exist rydesk_res.o del rydesk_res.o
+    :: Cleanup temp object file
+    if exist build\rydesk_res.o del build\rydesk_res.o
 ) else (
     echo.
-    echo [Error] Compilation failed!
+    echo [Error] Compilation failed! Please check your C++ code.
 )
 
 :end

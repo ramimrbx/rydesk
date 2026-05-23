@@ -1,0 +1,2 @@
+MAINICON ICON "src/main/resources/assets/images/icon.ico"
+MY_ICON_DATA RCDATA "src/main/resources/assets/images/icon.ico"
